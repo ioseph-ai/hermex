@@ -289,6 +289,11 @@ struct ChatView: View {
     @State private var followScrollGeneration = 0
     @State private var isUserInteractingWithScroll = false
     @State private var userScrollCooldownUntil: Date?
+    /// Transcript scroll anchor for older-message pagination (LazyVStack rows).
+    /// Non-nil only while restoring the viewport after a prepend; every
+    /// programmatic proxy scroll releases it first so the two scroll drivers
+    /// never fight (one driver per gesture — upstream #33 regression).
+    @State private var transcriptScrollPositionID: String?
     /// While set and in the future, auto-follow scrolls snap instead of animating, so
     /// the cache-first → network reconcile re-pins to the bottom without a jump (#289).
     @State private var cacheFirstSnapUntil: Date?
@@ -1068,6 +1073,7 @@ struct ChatView: View {
     private var messageContent: some View {
         ChatTranscriptView(
             isLoading: viewModel.isLoading,
+            transcriptScrollPositionID: $transcriptScrollPositionID,
             errorMessage: viewModel.errorMessage,
             messages: viewModel.messages,
             displayedTranscriptMessages: displayedTranscriptMessages,
@@ -2035,6 +2041,11 @@ struct ChatView: View {
             // Re-check at fire time: a gesture may have begun during the delay.
             if !isUserInitiated, isAutoFollowScrollPaused { return }
 
+                // The proxy is the sole driver of this scroll: release any
+                // pagination anchor first so SwiftUI's scroll-position binding
+                // cannot re-assert it mid-flight (one driver per gesture).
+                transcriptScrollPositionID = nil
+
             // Snap (no animation) while inside the cache-first reconcile window so the
             // taller server transcript replacing the cached one doesn't animate a jump
             // (#289). Evaluated at fire time so it's robust to onChange ordering.
@@ -2127,6 +2138,10 @@ struct ChatView: View {
         // streaming layout growth cannot yank the viewport mid-gesture.
         if metrics.isUserInteracting {
             userScrollCooldownUntil = ChatScrollPolicy.cooldownDeadline()
+            // A user gesture is the sole scroll driver while it lasts: release
+            // any pagination anchor so SwiftUI cannot re-assert it against the
+            // drag (status-bar-to-top, swipe). One driver per gesture.
+            transcriptScrollPositionID = nil
         }
 
         if isNearBottom {
