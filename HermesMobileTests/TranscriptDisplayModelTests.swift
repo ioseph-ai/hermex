@@ -576,3 +576,97 @@ final class ResponseSpeedFormatterTests: XCTestCase {
         XCTAssertNil(ResponseSpeedFormatter.compactText(.nan))
     }
 }
+
+final class ChatTranscriptViewPerformanceGuardTests: XCTestCase {
+    func testTranscriptUsesLazyStackForLongConversationScrollPerformance() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let sourceURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("HermesMobile/Features/Chat/ChatTranscriptView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let sourceWithoutComments = source
+            .replacingOccurrences(of: #"(?s)/\*.*?\*/"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)//.*$"#, with: "", options: .regularExpression)
+
+        XCTAssertTrue(
+            sourceWithoutComments.range(
+                of: #"\bLazyVStack\s*\(\s*spacing:\s*transcriptMessageSpacing\s*\)"#,
+                options: .regularExpression
+            ) != nil,
+            "The chat transcript should lazily realize message rows so long conversations do not lay out every bubble while scrolling."
+        )
+        XCTAssertFalse(
+            sourceWithoutComments.range(
+                of: #"\bVStack\s*\(\s*spacing:\s*transcriptMessageSpacing\s*\)"#,
+                options: .regularExpression
+            ) != nil,
+            "A plain VStack eagerly builds every transcript row and regresses long-chat scroll performance."
+        )
+        XCTAssertTrue(
+            sourceWithoutComments.range(
+                of: #"\.scrollTargetLayout\s*\(\s*\)"#,
+                options: .regularExpression
+            ) != nil,
+            "The lazy transcript stack should opt into scroll target layout so prepending older messages can restore the captured row ID."
+        )
+        XCTAssertTrue(
+            sourceWithoutComments.range(
+                of: #"@Binding\s+var\s+transcriptScrollPositionID\s*:\s*String\?"#,
+                options: .regularExpression
+            ) != nil,
+            "The transcript scroll position ID should be a binding owned by ChatView so every programmatic scroll path can release it before driving the viewport (one driver per gesture)."
+        )
+        XCTAssertTrue(
+            sourceWithoutComments.range(
+                of: #"\.scrollPosition\s*\(\s*id:\s*\$transcriptScrollPositionID\s*,\s*anchor:\s*\.top\s*\)"#,
+                options: .regularExpression
+            ) != nil,
+            "The scroll view should bind its scroll position to the captured transcript row anchor."
+        )
+        // One driver per gesture: pagination restores position via the binding alone.
+        XCTAssertFalse(
+            sourceWithoutComments.range(
+                of: #"loadOlderMessagesPreservingPosition[\s\S]*?proxy\.scrollTo"#,
+                options: .regularExpression
+            ) != nil,
+            "Pagination must not also drive proxy.scrollTo against the same anchor the binding already restores — the two drivers animate against each other (upstream #33 regression)."
+        )
+    }
+
+    /// The scroll-position binding must be releasable by ChatView: a stale anchor
+    /// is what fights status-bar-to-top and down-arrow proxy scrolls. Guards the
+    /// ownership move plus the two release sites (proxy fire time, user gesture).
+    func testChatViewOwnsAndReleasesTranscriptScrollAnchor() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let sourceURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("HermesMobile/Features/Chat/ChatView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let sourceWithoutComments = source
+            .replacingOccurrences(of: #"(?s)/\*.*?\*/"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)//.*$"#, with: "", options: .regularExpression)
+
+        XCTAssertTrue(
+            sourceWithoutComments.range(
+                of: #"@State\s+private\s+var\s+transcriptScrollPositionID\s*:\s*String\?"#,
+                options: .regularExpression
+            ) != nil,
+            "ChatView should own the transcript scroll anchor so programmatic scroll paths can release it before firing."
+        )
+        XCTAssertTrue(
+            sourceWithoutComments.range(
+                of: #"transcriptScrollPositionID:\s*\$transcriptScrollPositionID"#,
+                options: .regularExpression
+            ) != nil,
+            "ChatView should pass the anchor binding into ChatTranscriptView."
+        )
+        // At least two release sites: before proxy scrollTo fires, and on user drag.
+        let releaseCount = sourceWithoutComments.components(separatedBy: "transcriptScrollPositionID = nil").count - 1
+        XCTAssertGreaterThanOrEqual(
+            releaseCount, 2,
+            "Expected at least two anchor-release sites: at proxy-scroll fire time and on user interaction."
+        )
+    }
+}

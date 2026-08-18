@@ -4,6 +4,11 @@ import UIKit
 struct ChatTranscriptView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Owned by ChatView so every programmatic scroll path can release it before
+    /// driving the viewport (one driver per gesture). Only the pagination path
+    /// sets it non-nil, and only for the prepend window. Not `private`: that
+    /// would privatize the synthesized memberwise initializer.
+    @Binding var transcriptScrollPositionID: String?
 
     let isLoading: Bool
     let errorMessage: String?
@@ -132,6 +137,7 @@ struct ChatTranscriptView: View {
                         for: .sizeChanges
                     )
                     .frame(width: viewportWidth)
+                    .scrollPosition(id: $transcriptScrollPositionID, anchor: .top)
                     .refreshable {
                         if hasOlderMessages {
                             await loadOlderMessagesPreservingPosition(proxy: proxy)
@@ -204,7 +210,7 @@ struct ChatTranscriptView: View {
         viewportWidth: CGFloat,
         contentWidth: CGFloat
     ) -> some View {
-        VStack(spacing: transcriptMessageSpacing) {
+        LazyVStack(spacing: transcriptMessageSpacing) {
             olderMessagesButton(proxy: proxy)
 
             if let compressionReferenceCard, compressionReferenceCard.afterRenderID == nil {
@@ -278,6 +284,9 @@ struct ChatTranscriptView: View {
                 .id(bottomAnchorID)
                 .allowsHitTesting(false)
         }
+        // Keep lazy transcript rows registered as scroll targets so older-message
+        // prepends can restore the captured row ID without falling back to eager layout.
+        .scrollTargetLayout()
         .padding(.top, 16)
         .frame(width: contentWidth, alignment: .leading)
         .padding(.horizontal, transcriptHorizontalPadding)
@@ -316,19 +325,24 @@ struct ChatTranscriptView: View {
         }
     }
 
+    /// Older-message pagination is driven by the scroll-position binding alone:
+    /// capture the current top row before the prepend, then re-assert the same
+    /// ID so SwiftUI restores the viewport. No proxy scroll runs here — the
+    /// animated `proxy.scrollTo` fallback from upstream PR #33 targeted the
+    /// same row the binding already anchors and could double-animate (one
+    /// driver per gesture). A later programmatic proxy scroll or user drag
+    /// releases the binding first (see ChatView), so the anchor cannot go
+    /// stale and fight those gestures. `proxy` is intentionally unused.
     private func loadOlderMessagesPreservingPosition(proxy: ScrollViewProxy) async {
         let renderID = displayedTranscriptMessages.first?.renderID
+        if let renderID {
+            transcriptScrollPositionID = renderID
+        }
+
         let didLoad = await onLoadOlderMessages()
         guard didLoad, let renderID else { return }
 
-        await Task.yield()
-        if reduceMotion {
-            proxy.scrollTo(renderID, anchor: .top)
-        } else {
-            withAnimation(ChatMotion.quickState(reduceMotion: reduceMotion)) {
-                proxy.scrollTo(renderID, anchor: .top)
-            }
-        }
+        transcriptScrollPositionID = renderID
     }
 
     @ViewBuilder
