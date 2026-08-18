@@ -1072,8 +1072,8 @@ struct ChatView: View {
     @ViewBuilder
     private var messageContent: some View {
         ChatTranscriptView(
-            isLoading: viewModel.isLoading,
             transcriptScrollPositionID: $transcriptScrollPositionID,
+            isLoading: viewModel.isLoading,
             errorMessage: viewModel.errorMessage,
             messages: viewModel.messages,
             displayedTranscriptMessages: displayedTranscriptMessages,

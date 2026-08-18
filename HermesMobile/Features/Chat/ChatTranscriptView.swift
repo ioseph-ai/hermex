@@ -6,8 +6,9 @@ struct ChatTranscriptView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Owned by ChatView so every programmatic scroll path can release it before
     /// driving the viewport (one driver per gesture). Only the pagination path
-    /// sets it non-nil, and only for the prepend window.
-    @Binding private var transcriptScrollPositionID: String?
+    /// sets it non-nil, and only for the prepend window. Not `private`: that
+    /// would privatize the synthesized memberwise initializer.
+    @Binding var transcriptScrollPositionID: String?
 
     let isLoading: Bool
     let errorMessage: String?

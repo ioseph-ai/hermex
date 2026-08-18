@@ -612,7 +612,7 @@ final class ChatTranscriptViewPerformanceGuardTests: XCTestCase {
         )
         XCTAssertTrue(
             sourceWithoutComments.range(
-                of: #"@Binding\s+private\s+var\s+transcriptScrollPositionID\s*:\s*String\?"#,
+                of: #"@Binding\s+var\s+transcriptScrollPositionID\s*:\s*String\?"#,
                 options: .regularExpression
             ) != nil,
             "The transcript scroll position ID should be a binding owned by ChatView so every programmatic scroll path can release it before driving the viewport (one driver per gesture)."
