@@ -215,3 +215,5 @@ jobs:
             success|skipped) echo "Gate passed." ;;
             *) echo "Build and Test did not pass — failing the gate." >&2; exit 1 ;;
           esac
+
+# fork-ci-note: workflow re-registered on fork
