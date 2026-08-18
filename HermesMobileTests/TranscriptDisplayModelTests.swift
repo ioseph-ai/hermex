@@ -575,6 +575,7 @@ final class ResponseSpeedFormatterTests: XCTestCase {
         XCTAssertNil(ResponseSpeedFormatter.compactText(.infinity))
         XCTAssertNil(ResponseSpeedFormatter.compactText(.nan))
     }
+}
 
 final class ChatTranscriptViewPerformanceGuardTests: XCTestCase {
     func testTranscriptUsesLazyStackForLongConversationScrollPerformance() throws {
