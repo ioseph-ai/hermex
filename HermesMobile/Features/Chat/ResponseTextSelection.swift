@@ -3,6 +3,21 @@ import UIKit
 
 /// One native selection document around the existing response layout. Text leaves
 /// supply their actual glyph geometry; images, equations and controls never register.
+/// The inputs the hosted graph is built from. `identity` carries the reply text the
+/// content is built out of; the environment values are what the hosted Markdown reads
+/// for layout and colour. Rebuilding `rootView` when none of them changed replaces the
+/// whole hosted view graph for no reason (issue #1256).
+fileprivate struct HostedSelectionInputs: Equatable {
+    let identity: String
+    let collectsGlyphs: Bool
+    let colorScheme: ColorScheme
+    let dynamicTypeSize: DynamicTypeSize
+    let layoutDirection: LayoutDirection
+    let displayScale: CGFloat
+    let legibilityWeight: LegibilityWeight?
+    let colorSchemeContrast: ColorSchemeContrast
+}
+
 struct ResponseTextSelection<Content: View>: UIViewControllerRepresentable {
     let identity: String
     // Metadata stays registered when glyph rendering is deferred offscreen.
@@ -10,6 +25,12 @@ struct ResponseTextSelection<Content: View>: UIViewControllerRepresentable {
     var onAskHermex: ((String) -> Void)?
     @ViewBuilder let content: () -> Content
     @Environment(\.self) private var environment
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.legibilityWeight) private var legibilityWeight
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     /// The hosted content's height. The content can grow after its first layout
     /// (MarkdownUI block margins, async code highlighting); reading this in
     /// `updateUIViewController` turns that growth into an update, so SwiftUI asks
@@ -28,8 +49,22 @@ struct ResponseTextSelection<Content: View>: UIViewControllerRepresentable {
             controller.input.selectedTextRange = nil
             controller.identity = identity
         }
+        // Both reads keep this representable dependent on `contentHeight`, so a reply
+        // that grows after its first layout still asks for a new height.
         _ = contentHeight
         let contentHeight = $contentHeight
+        // Rebuild only when an input the hosted graph is built from changed (#1256).
+        let hostedInputs = HostedSelectionInputs(
+            identity: identity,
+            collectsGlyphs: collectsGlyphs,
+            colorScheme: colorScheme,
+            dynamicTypeSize: dynamicTypeSize,
+            layoutDirection: layoutDirection,
+            displayScale: displayScale,
+            legibilityWeight: legibilityWeight,
+            colorSchemeContrast: colorSchemeContrast)
+        guard controller.hostedInputs != hostedInputs else { return }
+        controller.hostedInputs = hostedInputs
         controller.host.rootView = AnyView(content()
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight.wrappedValue = $0 }
             .responseSelectionDocument(controller.scope)
@@ -48,6 +83,7 @@ final class ResponseSelectionController: UIViewController {
     lazy var scope = ResponseSelectionScope(input: input)
     let host = UIHostingController(rootView: AnyView(EmptyView()))
     var identity = ""
+    fileprivate var hostedInputs: HostedSelectionInputs?
 
     override func loadView() {
         view = input
